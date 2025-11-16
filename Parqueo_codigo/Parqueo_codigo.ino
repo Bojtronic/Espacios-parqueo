@@ -7,52 +7,47 @@
 #define TRIG4 23
 #define ECHO4 35
 
-int totalSpaces = 11;   // Espacios iniciales
-const float DETECT_DIST = 10.0; // 10 cm
-const unsigned long DETECT_TIME = 1000; // 1 segundo
+int totalSpaces = 11;
+const float DETECT_DIST = 10.0;
+const unsigned long MIN_TIME = 300;  // tiempo mínimo de detección simultánea
+const unsigned long STEP_TIMEOUT = 3000; // timeout para secuencias largas
 
-// Estados para el control de secuencia
-enum ParkingState {
+// ESTADOS DE LA SECUENCIA
+enum State {
   IDLE,
-  ENTRY_DETECTED,
-  ENTRY_CONFIRMED,
-  EXIT_DETECTED,
-  EXIT_CONFIRMED
+  ENTRY_STAGE1,      // S1 → S2
+  ENTRY_STAGE2,      // ambos S1 y S2 activos
+  ENTRY_STAGE3,      // S2 solo, S1 ya no
+  ENTRY_STAGE4,      // S3 → S4
+  ENTRY_STAGE5,      // solo S4 → confirmar entrada
+  EXIT_STAGE1,       // S4 → S3
+  EXIT_STAGE2,       // ambos S4 y S3 activos
+  EXIT_STAGE3,       // solo S3
+  EXIT_STAGE4,       // S2 → S1
+  EXIT_STAGE5        // solo S1 → confirmar salida
 };
 
-ParkingState currentState = IDLE;
+State currentState = IDLE;
 
-// Tiempos de detección
-unsigned long entryDetectionTime = 0;
-unsigned long exitDetectionTime = 0;
-unsigned long lastStateChange = 0;
+unsigned long t1 = 0, t2 = 0, t3 = 0, t4 = 0;
+unsigned long stageStart = 0;
 
-// Variables para seguimiento de detecciones
-bool sensor1Active = false;
-bool sensor2Active = false;
-bool sensor3Active = false;
-bool sensor4Active = false;
-
-// Variable para llevar el control del último conteo mostrado
-int lastDisplayedSpaces = 11;
-
-// ------------------- Función para medir distancia -------------------
-long getDistanceCM(int trigPin, int echoPin) {
-  digitalWrite(trigPin, LOW);
+// LECTURA ULTRASONIDO
+long getDistance(int trig, int echo) {
+  digitalWrite(trig, LOW);
   delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);
+  digitalWrite(trig, HIGH);
   delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
+  digitalWrite(trig, LOW);
 
-  long duration = pulseIn(echoPin, HIGH, 30000); // 30 ms timeout
-  if (duration == 0) {
-    return 1000; // Valor alto si no hay detección
-  }
-  long distance = duration * 0.034 / 2;          // cm
-  return distance;
+  long dur = pulseIn(echo, HIGH, 30000);
+  if(dur == 0) return 1000;
+  return dur * 0.034 / 2;
 }
 
-// ------------------- Setup -------------------
+bool s1, s2, s3, s4;
+
+// -------------------------------------------------------------
 void setup() {
   Serial.begin(115200);
 
@@ -61,111 +56,131 @@ void setup() {
   pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
   pinMode(TRIG4, OUTPUT); pinMode(ECHO4, INPUT);
 
-  Serial.println("Sistema de parqueo iniciado");
-  Serial.print("Espacios disponibles: ");
-  Serial.println(totalSpaces);
+  Serial.println("Sistema iniciado");
 }
 
-// ------------------- Loop principal -------------------
+// -------------------------------------------------------------
 void loop() {
   // Leer sensores
-  long d1 = getDistanceCM(TRIG1, ECHO1);
-  long d2 = getDistanceCM(TRIG2, ECHO2);
-  long d3 = getDistanceCM(TRIG3, ECHO3);
-  long d4 = getDistanceCM(TRIG4, ECHO4);
+  s1 = (getDistance(TRIG1, ECHO1) < DETECT_DIST);
+  s2 = (getDistance(TRIG2, ECHO2) < DETECT_DIST);
+  s3 = (getDistance(TRIG3, ECHO3) < DETECT_DIST);
+  s4 = (getDistance(TRIG4, ECHO4) < DETECT_DIST);
 
   unsigned long now = millis();
 
-  // Actualizar estado de sensores
-  sensor1Active = (d1 < DETECT_DIST);
-  sensor2Active = (d2 < DETECT_DIST);
-  sensor3Active = (d3 < DETECT_DIST);
-  sensor4Active = (d4 < DETECT_DIST);
+  // Timeout general
+  if (currentState != IDLE && (now - stageStart > STEP_TIMEOUT)) {
+    Serial.println(">> Secuencia cancelada por timeout");
+    currentState = IDLE;
+  }
 
-  // Máquina de estados para controlar el flujo de vehículos
-  switch (currentState) {
+  switch(currentState) {
+
+    // *************************************
+    // *************   IDLE   **************
+    // *************************************
     case IDLE:
-      // Esperando detección en entrada o salida
-      if (sensor1Active && sensor2Active) {
-        entryDetectionTime = now;
-        currentState = ENTRY_DETECTED;
-        Serial.println(">> Vehículo detectado en ENTRADA (sensores 1 y 2)");
-      } else if (sensor4Active && sensor3Active) {
-        exitDetectionTime = now;
-        currentState = EXIT_DETECTED;
-        Serial.println(">> Vehículo detectado en SALIDA (sensores 4 y 3)");
+      if (s1 && !s2) { 
+        currentState = ENTRY_STAGE1;
+        stageStart = now;
+        Serial.println("Entrada: S1 activo primero");
+      }
+      else if (s4 && !s3) {
+        currentState = EXIT_STAGE1;
+        stageStart = now;
+        Serial.println("Salida: S4 activo primero");
       }
       break;
 
-    case ENTRY_DETECTED:
-      // Verificar que se mantenga la detección por al menos 1 segundo
-      if (now - entryDetectionTime >= DETECT_TIME) {
-        if (sensor3Active && sensor4Active) {
-          currentState = ENTRY_CONFIRMED;
-          Serial.println(">> Vehículo confirmado ingresando al parqueo (sensores 3 y 4)");
-        } else if (!sensor1Active && !sensor2Active) {
-          // El vehículo no continuó hacia el parqueo
-          currentState = IDLE;
-          Serial.println(">> Vehículo no ingresó al parqueo");
-        }
-      } else if (!sensor1Active || !sensor2Active) {
-        // La detección se interrumpió antes del tiempo mínimo
+    // ================== ENTRADA =====================
+    case ENTRY_STAGE1:  // S1 → S2
+      if (s1 && s2) {
+        currentState = ENTRY_STAGE2;
+        stageStart = now;
+        Serial.println("Entrada: S1 y S2 activos simultáneamente");
+      }
+      break;
+
+    case ENTRY_STAGE2:  // ambos activos
+      if (!s1 && s2) {
+        currentState = ENTRY_STAGE3;
+        stageStart = now;
+        Serial.println("Entrada: S1 se libera, S2 sigue");
+      }
+      break;
+
+    case ENTRY_STAGE3:  // S3 → S4
+      if (s3 && !s4) {
+        currentState = ENTRY_STAGE4;
+        stageStart = now;
+        Serial.println("Entrada: S3 activo");
+      }
+      break;
+
+    case ENTRY_STAGE4:
+      if (s3 && s4) {
+        currentState = ENTRY_STAGE5;
+        stageStart = now;
+        Serial.println("Entrada: S3 y S4 activos simultáneamente");
+      }
+      break;
+
+    case ENTRY_STAGE5:
+      if (!s3 && s4) {
+        Serial.println("Entrada: Confirmada → espacio -1");
+        if (totalSpaces > 0) totalSpaces--;
+        Serial.print("Espacios disponibles: ");
+        Serial.println(totalSpaces);
+
         currentState = IDLE;
       }
       break;
 
-    case ENTRY_CONFIRMED:
-      // Esperar a que el vehículo complete su ingreso
-      if (!sensor3Active && !sensor4Active) {
-        // El vehículo ha ingresado completamente al parqueo
-        if (totalSpaces > 0) {
-          totalSpaces--;
-        }
-        // Mostrar espacios disponibles
-        if (lastDisplayedSpaces != totalSpaces) {
-          Serial.print("Auto ingresó. Espacios disponibles: ");
-          Serial.println(totalSpaces);
-          lastDisplayedSpaces = totalSpaces;
-        }
-        currentState = IDLE;
+    // ================== SALIDA =====================
+    case EXIT_STAGE1:  // S4 → S3
+      if (s4 && s3) {
+        currentState = EXIT_STAGE2;
+        stageStart = now;
+        Serial.println("Salida: S4 y S3 simultáneos");
       }
       break;
 
-    case EXIT_DETECTED:
-      // Verificar que se mantenga la detección por al menos 1 segundo
-      if (now - exitDetectionTime >= DETECT_TIME) {
-        if (sensor2Active && sensor1Active) {
-          currentState = EXIT_CONFIRMED;
-          Serial.println(">> Vehículo confirmado saliendo del parqueo (sensores 2 y 1)");
-        } else if (!sensor4Active && !sensor3Active) {
-          // El vehículo no continuó hacia la salida
-          currentState = IDLE;
-          Serial.println(">> Vehículo no salió del parqueo");
-        }
-      } else if (!sensor4Active || !sensor3Active) {
-        // La detección se interrumpió antes del tiempo mínimo
-        currentState = IDLE;
+    case EXIT_STAGE2:
+      if (!s4 && s3) {
+        currentState = EXIT_STAGE3;
+        stageStart = now;
+        Serial.println("Salida: S4 se libera, S3 sigue");
       }
       break;
 
-    case EXIT_CONFIRMED:
-      // Esperar a que el vehículo complete su salida
-      if (!sensor2Active && !sensor1Active) {
-        // El vehículo ha salido completamente del parqueo
-        if (totalSpaces < 11) {
-          totalSpaces++;
-        }
-        // Mostrar espacios disponibles
-        if (lastDisplayedSpaces != totalSpaces) {
-          Serial.print("Auto salió. Espacios disponibles: ");
-          Serial.println(totalSpaces);
-          lastDisplayedSpaces = totalSpaces;
-        }
+    case EXIT_STAGE3:  // S2 → S1
+      if (s2 && !s1) {
+        currentState = EXIT_STAGE4;
+        stageStart = now;
+        Serial.println("Salida: S2 activo");
+      }
+      break;
+
+    case EXIT_STAGE4:
+      if (s2 && s1) {
+        currentState = EXIT_STAGE5;
+        stageStart = now;
+        Serial.println("Salida: S2 y S1 simultáneos");
+      }
+      break;
+
+    case EXIT_STAGE5:
+      if (!s2 && s1) {
+        Serial.println("Salida: Confirmada → espacio +1");
+        if (totalSpaces < 11) totalSpaces++;
+        Serial.print("Espacios disponibles: ");
+        Serial.println(totalSpaces);
+
         currentState = IDLE;
       }
       break;
   }
 
-  // Pequeña pausa para evitar saturación
-  delay(100);
+  delay(120);
 }
