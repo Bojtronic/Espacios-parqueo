@@ -8,11 +8,12 @@ app.use(express.json());
 // Servir archivos estáticos desde /public
 app.use(express.static(path.join(__dirname, './public')));
 
-let ultimoMovimiento = null;
+let ultimoMovimiento = "—";
 let espaciosDisponibles = 0;
 
 // ---- RUTAS DEL API ----
 
+// Recibe datos del ESP32
 app.post('/api/movimiento', (req, res) => {
     const { movimiento, espacios } = req.body;
 
@@ -28,10 +29,17 @@ app.post('/api/movimiento', (req, res) => {
     res.json({ status: "OK" });
 });
 
+// Enviados al frontend cada segundo
+app.get('/api/estado', (req, res) => {
+    res.json({
+        ultimoMovimiento,
+        espaciosDisponibles
+    });
+});
+
 // ---- INICIO DEL SERVIDOR ----
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor accesible en la red: http://192.168.18.26:${PORT}`);
 });
-
