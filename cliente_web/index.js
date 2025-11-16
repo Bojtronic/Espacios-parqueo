@@ -8,14 +8,24 @@ app.use(express.json());
 // Servir archivos estáticos desde /public
 app.use(express.static(path.join(__dirname, './public')));
 
-// ---- RUTAS DEL API ----
-app.get('/api/movimiento', (req, res) => {
-    res.json({ mensaje: "Hola desde la API!" });
-});
+let ultimoMovimiento = null;
+let espaciosDisponibles = 0;
 
-app.post('/api/espacios', (req, res) => {
-    const { texto } = req.body;
-    res.json({ recibido: texto });
+// ---- RUTAS DEL API ----
+
+app.post('/api/movimiento', (req, res) => {
+    const { movimiento, espacios } = req.body;
+
+    if (!movimiento || espacios === undefined) {
+        return res.status(400).json({ error: "Datos incompletos" });
+    }
+
+    ultimoMovimiento = movimiento;
+    espaciosDisponibles = espacios;
+
+    console.log("Movimiento recibido:", movimiento, " | Espacios:", espacios);
+
+    res.json({ status: "OK" });
 });
 
 // ---- INICIO DEL SERVIDOR ----

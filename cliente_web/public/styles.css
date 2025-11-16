@@ -1,10 +1,59 @@
 body {
-    font-family: Arial;
-    background: #f4f4f4;
+    font-family: "Segoe UI", Arial, sans-serif;
+    background: #eef1f5;
+    margin: 0;
     padding: 20px;
+    display: flex;
+    justify-content: center;
 }
 
-button {
-    padding: 10px 20px;
-    cursor: pointer;
+.container {
+    width: 90%;
+    max-width: 900px;
+}
+
+h1 {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.cards {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.card {
+    background: white;
+    padding: 20px 25px;
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    width: 250px;
+    text-align: center;
+}
+
+.card h3 {
+    margin: 0;
+    color: #444;
+    font-weight: 600;
+}
+
+.value {
+    font-size: 28px;
+    margin-top: 10px;
+    color: #0077cc;
+    font-weight: bold;
+}
+
+.value.big {
+    font-size: 40px;
+}
+
+.chart-container {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }

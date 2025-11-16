@@ -1,3 +1,7 @@
+#include "secrets.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
+
 #define TRIG1 16
 #define ECHO1 36
 #define TRIG2 17
@@ -9,30 +13,48 @@
 
 int totalSpaces = 11;
 const float DETECT_DIST = 10.0;
-const unsigned long MIN_TIME = 300;  // tiempo mínimo de detección simultánea
-const unsigned long STEP_TIMEOUT = 3000; // timeout para secuencias largas
+const unsigned long STEP_TIMEOUT = 3000;
 
-// ESTADOS DE LA SECUENCIA
 enum State {
   IDLE,
-  ENTRY_STAGE1,      // S1 → S2
-  ENTRY_STAGE2,      // ambos S1 y S2 activos
-  ENTRY_STAGE3,      // S2 solo, S1 ya no
-  ENTRY_STAGE4,      // S3 → S4
-  ENTRY_STAGE5,      // solo S4 → confirmar entrada
-  EXIT_STAGE1,       // S4 → S3
-  EXIT_STAGE2,       // ambos S4 y S3 activos
-  EXIT_STAGE3,       // solo S3
-  EXIT_STAGE4,       // S2 → S1
-  EXIT_STAGE5        // solo S1 → confirmar salida
+  ENTRY_STAGE1,
+  ENTRY_STAGE2,
+  ENTRY_STAGE3,
+  ENTRY_STAGE4,
+  ENTRY_STAGE5,
+  EXIT_STAGE1,
+  EXIT_STAGE2,
+  EXIT_STAGE3,
+  EXIT_STAGE4,
+  EXIT_STAGE5
 };
 
 State currentState = IDLE;
-
-unsigned long t1 = 0, t2 = 0, t3 = 0, t4 = 0;
 unsigned long stageStart = 0;
 
-// LECTURA ULTRASONIDO
+bool s1, s2, s3, s4;
+
+// -------------------- ENVIAR POST AL SERVIDOR ---------------------------
+void sendToServer(String movimiento, int espacios) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi desconectado!");
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(API_URL);
+  http.addHeader("Content-Type", "application/json");
+
+  String body = "{\"movimiento\":\"" + movimiento + "\",\"espacios\":" + String(espacios) + "}";
+  Serial.println("Enviando: " + body);
+
+  int httpCode = http.POST(body);
+  Serial.println("Respuesta servidor: " + String(httpCode));
+
+  http.end();
+}
+
+// -------------------- SENSOR ULTRASONICO ---------------------------
 long getDistance(int trig, int echo) {
   digitalWrite(trig, LOW);
   delayMicroseconds(2);
@@ -41,15 +63,22 @@ long getDistance(int trig, int echo) {
   digitalWrite(trig, LOW);
 
   long dur = pulseIn(echo, HIGH, 30000);
-  if(dur == 0) return 1000;
+  if (dur == 0) return 1000;
   return dur * 0.034 / 2;
 }
 
-bool s1, s2, s3, s4;
-
-// -------------------------------------------------------------
+// -------------------- SETUP ---------------------------
 void setup() {
   Serial.begin(115200);
+
+  // WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("Conectando a WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi conectado!");
 
   pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
   pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
@@ -59,9 +88,9 @@ void setup() {
   Serial.println("Sistema iniciado");
 }
 
-// -------------------------------------------------------------
+// -------------------- LOOP PRINCIPAL ---------------------------
 void loop() {
-  // Leer sensores
+
   s1 = (getDistance(TRIG1, ECHO1) < DETECT_DIST);
   s2 = (getDistance(TRIG2, ECHO2) < DETECT_DIST);
   s3 = (getDistance(TRIG3, ECHO3) < DETECT_DIST);
@@ -69,7 +98,6 @@ void loop() {
 
   unsigned long now = millis();
 
-  // Timeout general
   if (currentState != IDLE && (now - stageStart > STEP_TIMEOUT)) {
     Serial.println(">> Secuencia cancelada por timeout");
     currentState = IDLE;
@@ -77,105 +105,62 @@ void loop() {
 
   switch(currentState) {
 
-    // *************************************
-    // *************   IDLE   **************
-    // *************************************
     case IDLE:
-      if (s1 && !s2) { 
-        currentState = ENTRY_STAGE1;
-        stageStart = now;
-        Serial.println("Entrada: S1 activo primero");
-      }
-      else if (s4 && !s3) {
-        currentState = EXIT_STAGE1;
-        stageStart = now;
-        Serial.println("Salida: S4 activo primero");
-      }
+      if (s1 && !s2) { currentState = ENTRY_STAGE1; stageStart = now; }
+      else if (s4 && !s3) { currentState = EXIT_STAGE1; stageStart = now; }
       break;
 
     // ================== ENTRADA =====================
-    case ENTRY_STAGE1:  // S1 → S2
-      if (s1 && s2) {
-        currentState = ENTRY_STAGE2;
-        stageStart = now;
-        Serial.println("Entrada: S1 y S2 activos simultáneamente");
-      }
+    case ENTRY_STAGE1:
+      if (s1 && s2) { currentState = ENTRY_STAGE2; stageStart = now; }
       break;
 
-    case ENTRY_STAGE2:  // ambos activos
-      if (!s1 && s2) {
-        currentState = ENTRY_STAGE3;
-        stageStart = now;
-        Serial.println("Entrada: S1 se libera, S2 sigue");
-      }
+    case ENTRY_STAGE2:
+      if (!s1 && s2) { currentState = ENTRY_STAGE3; stageStart = now; }
       break;
 
-    case ENTRY_STAGE3:  // S3 → S4
-      if (s3 && !s4) {
-        currentState = ENTRY_STAGE4;
-        stageStart = now;
-        Serial.println("Entrada: S3 activo");
-      }
+    case ENTRY_STAGE3:
+      if (s3 && !s4) { currentState = ENTRY_STAGE4; stageStart = now; }
       break;
 
     case ENTRY_STAGE4:
-      if (s3 && s4) {
-        currentState = ENTRY_STAGE5;
-        stageStart = now;
-        Serial.println("Entrada: S3 y S4 activos simultáneamente");
-      }
+      if (s3 && s4) { currentState = ENTRY_STAGE5; stageStart = now; }
       break;
 
     case ENTRY_STAGE5:
       if (!s3 && s4) {
-        Serial.println("Entrada: Confirmada → espacio -1");
+        Serial.println("Entrada confirmada!");
         if (totalSpaces > 0) totalSpaces--;
-        Serial.print("Espacios disponibles: ");
-        Serial.println(totalSpaces);
+
+        sendToServer("ENTRADA", totalSpaces);
 
         currentState = IDLE;
       }
       break;
 
     // ================== SALIDA =====================
-    case EXIT_STAGE1:  // S4 → S3
-      if (s4 && s3) {
-        currentState = EXIT_STAGE2;
-        stageStart = now;
-        Serial.println("Salida: S4 y S3 simultáneos");
-      }
+    case EXIT_STAGE1:
+      if (s4 && s3) { currentState = EXIT_STAGE2; stageStart = now; }
       break;
 
     case EXIT_STAGE2:
-      if (!s4 && s3) {
-        currentState = EXIT_STAGE3;
-        stageStart = now;
-        Serial.println("Salida: S4 se libera, S3 sigue");
-      }
+      if (!s4 && s3) { currentState = EXIT_STAGE3; stageStart = now; }
       break;
 
-    case EXIT_STAGE3:  // S2 → S1
-      if (s2 && !s1) {
-        currentState = EXIT_STAGE4;
-        stageStart = now;
-        Serial.println("Salida: S2 activo");
-      }
+    case EXIT_STAGE3:
+      if (s2 && !s1) { currentState = EXIT_STAGE4; stageStart = now; }
       break;
 
     case EXIT_STAGE4:
-      if (s2 && s1) {
-        currentState = EXIT_STAGE5;
-        stageStart = now;
-        Serial.println("Salida: S2 y S1 simultáneos");
-      }
+      if (s2 && s1) { currentState = EXIT_STAGE5; stageStart = now; }
       break;
 
     case EXIT_STAGE5:
       if (!s2 && s1) {
-        Serial.println("Salida: Confirmada → espacio +1");
+        Serial.println("Salida confirmada!");
         if (totalSpaces < 11) totalSpaces++;
-        Serial.print("Espacios disponibles: ");
-        Serial.println(totalSpaces);
+
+        sendToServer("SALIDA", totalSpaces);
 
         currentState = IDLE;
       }

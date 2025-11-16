@@ -2,16 +2,36 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Mi App Web + API</title>
+    <title>Estado del Parqueo</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
-    <h1>Interfaz Web Servida desde /public</h1>
+<div class="container">
 
-    <button id="btnSaludo">Consultar API</button>
-    <p id="respuesta"></p>
+    <h1>Estado actual del parqueo</h1>
 
-    <script src="app.js"></script>
+    <div class="cards">
+
+        <div class="card">
+            <h3>Último movimiento</h3>
+            <p id="movimiento" class="value">—</p>
+        </div>
+
+        <div class="card">
+            <h3>Espacios disponibles</h3>
+            <p id="espacios" class="value big">0</p>
+        </div>
+
+    </div>
+
+    <div class="chart-container">
+        <canvas id="grafico"></canvas>
+    </div>
+
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
