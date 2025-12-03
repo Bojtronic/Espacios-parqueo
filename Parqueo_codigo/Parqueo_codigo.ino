@@ -13,7 +13,6 @@
 
 int totalSpaces = 11;
 const float DETECT_DIST = 10.0;
-const unsigned long STEP_TIMEOUT = 3000;
 
 enum State {
   IDLE,
@@ -30,7 +29,6 @@ enum State {
 };
 
 State currentState = IDLE;
-unsigned long stageStart = 0;
 
 bool s1, s2, s3, s4;
 
@@ -71,7 +69,6 @@ long getDistance(int trig, int echo) {
 void setup() {
   Serial.begin(115200);
 
-  // WiFi
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Conectando a WiFi");
   while (WiFi.status() != WL_CONNECTED) {
@@ -96,75 +93,82 @@ void loop() {
   s3 = (getDistance(TRIG3, ECHO3) < DETECT_DIST);
   s4 = (getDistance(TRIG4, ECHO4) < DETECT_DIST);
 
-  unsigned long now = millis();
-
-  if (currentState != IDLE && (now - stageStart > STEP_TIMEOUT)) {
-    Serial.println(">> Secuencia cancelada por timeout");
-    currentState = IDLE;
-  }
+  bool invalidSequence = false;
 
   switch(currentState) {
 
     case IDLE:
-      if (s1 && !s2) { currentState = ENTRY_STAGE1; stageStart = now; }
-      else if (s4 && !s3) { currentState = EXIT_STAGE1; stageStart = now; }
+      if (s1 && !s2) currentState = ENTRY_STAGE1;
+      else if (s4 && !s3) currentState = EXIT_STAGE1;
+      else if ((s2 && !s1) || (s3 && !s4))
+        invalidSequence = true;
       break;
 
     // ================== ENTRADA =====================
     case ENTRY_STAGE1:
-      if (s1 && s2) { currentState = ENTRY_STAGE2; stageStart = now; }
+      if (s1 && s2) currentState = ENTRY_STAGE2;
+      else if (!s1 && !s2) invalidSequence = true;
       break;
 
     case ENTRY_STAGE2:
-      if (!s1 && s2) { currentState = ENTRY_STAGE3; stageStart = now; }
+      if (!s1 && s2) currentState = ENTRY_STAGE3;
+      else if (s1 && !s2) invalidSequence = true;
       break;
 
     case ENTRY_STAGE3:
-      if (s3 && !s4) { currentState = ENTRY_STAGE4; stageStart = now; }
+      if (s3 && !s4) currentState = ENTRY_STAGE4;
+      else if (!s2) invalidSequence = true;
       break;
 
     case ENTRY_STAGE4:
-      if (s3 && s4) { currentState = ENTRY_STAGE5; stageStart = now; }
+      if (s3 && s4) currentState = ENTRY_STAGE5;
+      else if (!s3) invalidSequence = true;
       break;
 
     case ENTRY_STAGE5:
       if (!s3 && s4) {
         Serial.println("Entrada confirmada!");
         if (totalSpaces > 0) totalSpaces--;
-
         sendToServer("ENTRADA", totalSpaces);
-
         currentState = IDLE;
-      }
+      } else if (!s4) invalidSequence = true;
       break;
 
     // ================== SALIDA =====================
     case EXIT_STAGE1:
-      if (s4 && s3) { currentState = EXIT_STAGE2; stageStart = now; }
+      if (s4 && s3) currentState = EXIT_STAGE2;
+      else if (!s4) invalidSequence = true;
       break;
 
     case EXIT_STAGE2:
-      if (!s4 && s3) { currentState = EXIT_STAGE3; stageStart = now; }
+      if (!s4 && s3) currentState = EXIT_STAGE3;
+      else if (s4 && !s3) invalidSequence = true;
       break;
 
     case EXIT_STAGE3:
-      if (s2 && !s1) { currentState = EXIT_STAGE4; stageStart = now; }
+      if (s2 && !s1) currentState = EXIT_STAGE4;
+      else if (!s3) invalidSequence = true;
       break;
 
     case EXIT_STAGE4:
-      if (s2 && s1) { currentState = EXIT_STAGE5; stageStart = now; }
+      if (s2 && s1) currentState = EXIT_STAGE5;
+      else if (!s2) invalidSequence = true;
       break;
 
     case EXIT_STAGE5:
       if (!s2 && s1) {
         Serial.println("Salida confirmada!");
         if (totalSpaces < 11) totalSpaces++;
-
         sendToServer("SALIDA", totalSpaces);
-
         currentState = IDLE;
-      }
+      } else if (!s1) invalidSequence = true;
       break;
+  }
+
+  // REINICIO POR SECUENCIA IMPOSIBLE
+  if (invalidSequence) {
+    Serial.println(">> Secuencia cancelada por patrón inválido");
+    currentState = IDLE;
   }
 
   delay(120);
