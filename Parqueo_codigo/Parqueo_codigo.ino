@@ -15,19 +15,29 @@
 // ======================= PARÁMETROS =======================
 int totalSpaces = 11;
 
-const float DETECT_DIST = 20.0;       // cm
-const uint8_t SAMPLES = 5;            // lecturas por sensor
-const uint16_t SAMPLE_DELAY = 10;     // ms
+const float DETECT_DIST = 20.0;   // cm
+const uint8_t SAMPLES = 5;        // lecturas por sensor
+const uint16_t SAMPLE_DELAY = 10; // ms
 
-// Reinicio por inactividad (ms). Permite pausas largas; ajustar si se desea.
-// Actualmente 30 minutos = 30 * 60 * 1000 ms
+// Reinicio por inactividad (ms). Permite pausas largas.
 const unsigned long RESET_TIMEOUT_MS = 30UL * 60UL * 1000UL;
 
 // ======================= ESTADOS =======================
-enum State {
+enum State
+{
   IDLE,
-  ENTRY_S1, ENTRY_S2, ENTRY_S3, ENTRY_S4, ENTRY_S5, ENTRY_S6,
-  EXIT_S1, EXIT_S2, EXIT_S3, EXIT_S4, EXIT_S5, EXIT_S6
+  ENTRY_S1,
+  ENTRY_S2,
+  ENTRY_S3,
+  ENTRY_S4,
+  ENTRY_S5,
+  ENTRY_S6,
+  EXIT_S1,
+  EXIT_S2,
+  EXIT_S3,
+  EXIT_S4,
+  EXIT_S5,
+  EXIT_S6
 };
 
 State state = IDLE;
@@ -38,11 +48,12 @@ bool prev_s1 = false, prev_s2 = false, prev_s3 = false, prev_s4 = false;
 
 unsigned long lastActiveMillis = 0;
 
-// ===============================================================
-// ================== FUNCIONES DE SENSORES ======================
-// ===============================================================
+// =======================================================================
+// ============================= FUNCIONES ===============================
+// =======================================================================
 
-long getDistanceRaw(int trig, int echo) {
+long getDistanceRaw(int trig, int echo)
+{
   digitalWrite(trig, LOW);
   delayMicroseconds(2);
   digitalWrite(trig, HIGH);
@@ -50,26 +61,32 @@ long getDistanceRaw(int trig, int echo) {
   digitalWrite(trig, LOW);
 
   long dur = pulseIn(echo, HIGH, 30000);
-  if (dur == 0) return 1000;
+  if (dur == 0)
+    return 1000;
   return dur * 0.034 / 2;
 }
 
-bool readSensorFiltered(int trig, int echo) {
+bool readSensorFiltered(int trig, int echo)
+{
   uint8_t hits = 0;
-  for (uint8_t i = 0; i < SAMPLES; i++) {
+  for (uint8_t i = 0; i < SAMPLES; i++)
+  {
     long d = getDistanceRaw(trig, echo);
-    if (d < DETECT_DIST) hits++;
+    if (d < DETECT_DIST)
+      hits++;
     delay(SAMPLE_DELAY);
   }
   return (hits >= ((SAMPLES / 2) + 1));
 }
 
-// ===============================================================
-// ================== ENVÍO AL SERVIDOR ==========================
-// ===============================================================
+// =======================================================================
+// ========================= ENVÍO SERVIDOR ===============================
+// =======================================================================
 
-void sendToServer(const String &movimiento, int espacios) {
-  if (WiFi.status() != WL_CONNECTED) {
+void sendToServer(const String &movimiento, int espacios)
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
     Serial.println("WiFi desconectado!");
     return;
   }
@@ -78,8 +95,7 @@ void sendToServer(const String &movimiento, int espacios) {
   http.begin(API_URL);
   http.addHeader("Content-Type", "application/json");
 
-  String body = "{\"movimiento\":\"" + movimiento +
-                "\",\"espacios\":" + String(espacios) + "}";
+  String body = "{\"movimiento\":\"" + movimiento + "\",\"espacios\":" + String(espacios) + "}";
 
   Serial.println("Enviando: " + body);
 
@@ -89,213 +105,336 @@ void sendToServer(const String &movimiento, int espacios) {
   http.end();
 }
 
-// ===============================================================
-// ========================= SETUP ===============================
-// ===============================================================
+// =======================================================================
+// =============================== ESTADOS ================================
+// =======================================================================
 
-void setup() {
+void logStateChange(State newState)
+{
+  Serial.print("STATE → ");
+  Serial.print(state);
+  Serial.print("   ==>   ");
+  Serial.println(newState);
+}
+
+void endEntryOk()
+{
+  Serial.println("✔ ENTRADA CONFIRMADA (FIN SECUENCIA)");
+  if (totalSpaces > 0)
+    totalSpaces--;
+  sendToServer("ENTRADA", totalSpaces);
+  logStateChange(IDLE);
+  state = IDLE;
+}
+
+void endExitOk()
+{
+  Serial.println("✔ SALIDA CONFIRMADA (FIN SECUENCIA)");
+  if (totalSpaces < 11)
+    totalSpaces++;
+  sendToServer("SALIDA", totalSpaces);
+  logStateChange(IDLE);
+  state = IDLE;
+}
+
+// =======================================================================
+// =============================== SETUP =================================
+// =======================================================================
+
+void setup()
+{
   Serial.begin(115200);
 
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   Serial.print("Conectando a WiFi");
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED)
+  {
     delay(500);
     Serial.print(".");
   }
   Serial.println("\nWiFi conectado!");
 
-  pinMode(TRIG1, OUTPUT); pinMode(ECHO1, INPUT);
-  pinMode(TRIG2, OUTPUT); pinMode(ECHO2, INPUT);
-  pinMode(TRIG3, OUTPUT); pinMode(ECHO3, INPUT);
-  pinMode(TRIG4, OUTPUT); pinMode(ECHO4, INPUT);
+  pinMode(TRIG1, OUTPUT);
+  pinMode(ECHO1, INPUT);
+  pinMode(TRIG2, OUTPUT);
+  pinMode(ECHO2, INPUT);
+  pinMode(TRIG3, OUTPUT);
+  pinMode(ECHO3, INPUT);
+  pinMode(TRIG4, OUTPUT);
+  pinMode(ECHO4, INPUT);
 
   lastActiveMillis = millis();
 
   Serial.println("--------------- Sistema iniciado ---------------");
 }
 
-// ===============================================================
-// ================== FUNCIONES DE SECUENCIA =====================
-// ===============================================================
+// =======================================================================
+// =============================== LOOP ==================================
+// =======================================================================
 
-void endEntryOk() {
-  Serial.println("✔ ENTRADA CONFIRMADA");
-  if (totalSpaces > 0) totalSpaces--;
-  sendToServer("ENTRADA", totalSpaces);
-  state = IDLE;
-}
+void loop()
+{
 
-void endExitOk() {
-  Serial.println("✔ SALIDA CONFIRMADA");
-  if (totalSpaces < 11) totalSpaces++;
-  sendToServer("SALIDA", totalSpaces);
-  state = IDLE;
-}
-
-// ===============================================================
-// ========================== LOOP ===============================
-// ===============================================================
-
-void loop() {
-
-  // Lectura filtrada: AHORA SI SON BOOLEANOS VERDADEROS
+  // Lecturas
   s1 = readSensorFiltered(TRIG1, ECHO1);
   s2 = readSensorFiltered(TRIG2, ECHO2);
   s3 = readSensorFiltered(TRIG3, ECHO3);
   s4 = readSensorFiltered(TRIG4, ECHO4);
 
-  // Actualizar último momento de actividad si algún sensor está activo
-  if (s1 || s2 || s3 || s4) {
+  // DETALLES DE SENSORES (ON/OFF)
+  if (s1 != prev_s1)
+    Serial.println(String("S1 ") + (s1 ? "ON" : "OFF"));
+  if (s2 != prev_s2)
+    Serial.println(String("S2 ") + (s2 ? "ON" : "OFF"));
+  if (s3 != prev_s3)
+    Serial.println(String("S3 ") + (s3 ? "ON" : "OFF"));
+  if (s4 != prev_s4)
+    Serial.println(String("S4 ") + (s4 ? "ON" : "OFF"));
+
+  // Actualizar tiempo activo
+  if (s1 || s2 || s3 || s4)
+  {
     lastActiveMillis = millis();
-  } else {
-    // Si no hay actividad por mucho tiempo, reiniciamos la FSM para evitar quedarse pegado
-    if ((millis() - lastActiveMillis) > RESET_TIMEOUT_MS) {
-      if (state != IDLE) {
-        Serial.println(">>> Reinicio por inactividad prolongada");
-        state = IDLE;
-      }
-      // actualizamos lastActiveMillis para evitar repetir el mensaje
-      lastActiveMillis = millis();
+  }
+  else if ((millis() - lastActiveMillis) > RESET_TIMEOUT_MS)
+  {
+    if (state != IDLE)
+    {
+      Serial.println(">>> Reinicio por inactividad prolongada");
+      logStateChange(IDLE);
+      state = IDLE;
     }
+    lastActiveMillis = millis();
   }
 
-  // DEBUG
-  /*
-  Serial.printf("\nS1=%d  S2=%d  S3=%d  S4=%d   state=%d   Spaces=%d\n",
-                s1, s2, s3, s4, state, totalSpaces);
-  */
-
-  // Detectar flancos ascendentes
+  // Flancos (subidas)
   bool rise_s1 = (s1 && !prev_s1);
   bool rise_s2 = (s2 && !prev_s2);
   bool rise_s3 = (s3 && !prev_s3);
   bool rise_s4 = (s4 && !prev_s4);
 
-  switch (state) {
+  if (rise_s1)
+    Serial.println("FLANCO ↑ S1");
+  if (rise_s2)
+    Serial.println("FLANCO ↑ S2");
+  if (rise_s3)
+    Serial.println("FLANCO ↑ S3");
+  if (rise_s4)
+    Serial.println("FLANCO ↑ S4");
 
-    // ===================== IDLE =====================
-    case IDLE:
-      // iniciar ENTRADA únicamente cuando S1 sube (inicio real)
-      if (rise_s1) {
-        state = ENTRY_S1;
-        Serial.println("Inicio ENTRADA → S1 (flanco)");
-      }
-      // iniciar SALIDA únicamente cuando S4 sube (inicio real)
-      else if (rise_s4) {
-        state = EXIT_S1;
-        Serial.println("Inicio SALIDA → S4 (flanco)");
-      }
-      break;
+  // ===================================================================
+  // ============================= FSM =================================
+  // ===================================================================
 
-    // ===================== ENTRADA =====================
-    // Avanzamos solamente hacia delante con condiciones claras. No hacemos rollback inmediato.
-    case ENTRY_S1:
-      // esperamos solapamiento s1 && s2 (auto largo)
-      if (s1 && s2) {
-        state = ENTRY_S2;
-        Serial.println("Entrada → S1&S2");
-      }
-      break;
+  switch (state)
+  {
 
-    case ENTRY_S2:
-      // esperamos s1 caer y s2 mantenerse
-      if (!s1 && s2) {
-        state = ENTRY_S3;
-        Serial.println("Entrada → S2 (solo)");
-      }
-      break;
+  // ===================================================================
+  // IDLE
+  // ===================================================================
+  case IDLE:
+    if (s1)
+    {
+      Serial.println("Inicio ENTRADA → s1");
+      logStateChange(ENTRY_S1);
+      state = ENTRY_S1;
+    }
+    else if (s4)
+    {
+      Serial.println("Inicio SALIDA → s4");
+      logStateChange(EXIT_S1);
+      state = EXIT_S1;
+    }
+    break;
 
-    case ENTRY_S3:
-      // esperamos detección en la zona 3 (arribo después de 20m)
-      if (rise_s3) {
-        // si s3 aparece, se avanza. si además s4 está activo, go to ENTRY_S4 directly
-        if (s3 && s4) {
-          state = ENTRY_S5;
-          Serial.println("Entrada → S3&S4 (llegada con overlap)");
-        } else {
-          state = ENTRY_S4;
-          Serial.println("Entrada → S3 detectado");
-        }
-      }
-      break;
+    // ===================================================================
+    // =========================== ENTRADA ===============================
+    // ===================================================================
 
-    case ENTRY_S4:
-      // si ambos se solapan en la zona 3-4
-      if (s3 && s4) {
-        state = ENTRY_S5;
-        Serial.println("Entrada → S3&S4 (overlap)");
-      }
-      break;
+  case ENTRY_S1: // s1
+    if (s1 && s2)
+    {
+      Serial.println("Entrando: s1 → s1&s2");
+      logStateChange(ENTRY_S2);
+      state = ENTRY_S2;
+    }
+    else if (!s1)
+    { // retroceso completo
+      Serial.println("RETROCESO: s1 → IDLE");
+      logStateChange(IDLE);
+      state = IDLE;
+    }
+    break;
 
-    case ENTRY_S5:
-      // esperamos s3 caer y s4 mantenerse
-      if (!s3 && s4) {
-        state = ENTRY_S6;
-        Serial.println("Entrada → S4 (solo)");
-      }
-      break;
+  case ENTRY_S2: // s1 & s2
+    if (!s1 && s2)
+    {
+      Serial.println("Entrando: s1&s2 → s2");
+      logStateChange(ENTRY_S3);
+      state = ENTRY_S3;
+    }
+    else if (s1 && !s2)
+    {
+      Serial.println("Retroceso: s1&s2 → s1");
+      logStateChange(ENTRY_S1);
+      state = ENTRY_S1;
+    }
+    break;
 
-    case ENTRY_S6:
-      // cuando ambos sensores 3&4 quedan libres -> confirmamos entrada
-      if (!s3 && !s4) {
-        endEntryOk();
-      }
-      break;
+  case ENTRY_S3: // s2
+    if (s3 && !s4)
+    {
+      Serial.println("Entrando: s2 → s3");
+      logStateChange(ENTRY_S4);
+      state = ENTRY_S4;
+    }
+    else if (s1 && s2)
+    {
+      Serial.println("Retroceso: s2 → s1&s2");
+      logStateChange(ENTRY_S2);
+      state = ENTRY_S2;
+    }
+    break;
 
-    // ===================== SALIDA =====================
-    case EXIT_S1:
-      // esperar solapamiento s4 && s3
-      if (s4 && s3) {
-        state = EXIT_S2;
-        Serial.println("Salida → S4&S3");
-      }
-      break;
+  case ENTRY_S4: // s3
+    if (s3 && s4)
+    {
+      Serial.println("Entrando: s3 → s3&s4");
+      logStateChange(ENTRY_S5);
+      state = ENTRY_S5;
+    }
+    else if (!s3 && s2)
+    {
+      Serial.println("Retroceso: s3 → s2");
+      logStateChange(ENTRY_S3);
+      state = ENTRY_S3;
+    }
+    break;
 
-    case EXIT_S2:
-      // esperar s4 caer y s3 mantenerse
-      if (!s4 && s3) {
-        state = EXIT_S3;
-        Serial.println("Salida → S3 (solo)");
-      }
-      break;
+  case ENTRY_S5: // s3 & s4
+    if (!s3 && s4)
+    {
+      Serial.println("Entrando: s3&s4 → s4");
+      logStateChange(ENTRY_S6);
+      state = ENTRY_S6;
+    }
+    else if (s3 && !s4)
+    {
+      Serial.println("Retroceso: s3&s4 → s3");
+      logStateChange(ENTRY_S4);
+      state = ENTRY_S4;
+    }
+    break;
 
-    case EXIT_S3:
-      // esperar detección en zona 2 (después de 20m)
-      if (rise_s2) {
-        if (s2 && s1) {
-          state = EXIT_S5;
-          Serial.println("Salida → S2&S1 (llegada con overlap)");
-        } else {
-          state = EXIT_S4;
-          Serial.println("Salida → S2 detectado");
-        }
-      }
-      break;
+  case ENTRY_S6: // solo s4 (fin de entrada)
+    if (!s4)
+    {
+      endEntryOk();
+      state = IDLE;
+    }
+    else if (s3 && s4)
+    {
+      Serial.println("Retroceso: s4 → s3&s4");
+      logStateChange(ENTRY_S5);
+      state = ENTRY_S5;
+    }
+    break;
 
-    case EXIT_S4:
-      if (s2 && s1) {
-        state = EXIT_S5;
-        Serial.println("Salida → S2&S1 (overlap)");
-      }
-      break;
+    // ===================================================================
+    // ============================ SALIDA ===============================
+    // ===================================================================
 
-    case EXIT_S5:
-      // esperar s2 caer y s1 mantenerse
-      if (!s2 && s1) {
-        state = EXIT_S6;
-        Serial.println("Salida → S1 (solo)");
-      }
-      break;
+  case EXIT_S1: // s4
+    if (s4 && s3)
+    {
+      Serial.println("Saliendo: s4 → s4&s3");
+      logStateChange(EXIT_S2);
+      state = EXIT_S2;
+    }
+    else if (!s4)
+    {
+      Serial.println("Retroceso: s4 → IDLE");
+      logStateChange(IDLE);
+      state = IDLE;
+    }
+    break;
 
-    case EXIT_S6:
-      // cuando ambos sensores 2&1 quedan libres -> confirmamos salida
-      if (!s2 && !s1) {
-        endExitOk();
-      }
-      break;
+  case EXIT_S2: // s4 & s3
+    if (!s4 && s3)
+    {
+      Serial.println("Saliendo: s4&s3 → s3");
+      logStateChange(EXIT_S3);
+      state = EXIT_S3;
+    }
+    else if (s4 && !s3)
+    {
+      Serial.println("Retroceso: s4&s3 → s4");
+      logStateChange(EXIT_S1);
+      state = EXIT_S1;
+    }
+    break;
+
+  case EXIT_S3: // s3
+    if (s2 && !s1)
+    {
+      Serial.println("Saliendo: s3 → s2");
+      logStateChange(EXIT_S4);
+      state = EXIT_S4;
+    }
+    else if (s4 && s3)
+    {
+      Serial.println("Retroceso: s3 → s4&s3");
+      logStateChange(EXIT_S2);
+      state = EXIT_S2;
+    }
+    break;
+
+  case EXIT_S4: // s2
+    if (s1 && s2)
+    {
+      Serial.println("Saliendo: s2 → s1&s2");
+      logStateChange(EXIT_S5);
+      state = EXIT_S5;
+    }
+    else if (!s2 && s3)
+    {
+      Serial.println("Retroceso: s2 → s3");
+      logStateChange(EXIT_S3);
+      state = EXIT_S3;
+    }
+    break;
+
+  case EXIT_S5: // s1 & s2
+    if (s1 && !s2)
+    {
+      Serial.println("Saliendo: s1&s2 → s1");
+      logStateChange(EXIT_S6);
+      state = EXIT_S6;
+    }
+    else if (s2 && !s1)
+    {
+      Serial.println("Retroceso: s1&s2 → s2");
+      logStateChange(EXIT_S4);
+      state = EXIT_S4;
+    }
+    break;
+
+  case EXIT_S6: // solo s1 (fin de salida)
+    if (!s1)
+    {
+      endExitOk();
+      state = IDLE;
+    }
+    else if (s1 && s2)
+    {
+      Serial.println("Retroceso: s1 → s1&s2");
+      logStateChange(EXIT_S5);
+      state = EXIT_S5;
+    }
+    break;
   }
 
-  // guardar lecturas previas
+  // Guardar estados previos
   prev_s1 = s1;
   prev_s2 = s2;
   prev_s3 = s3;
