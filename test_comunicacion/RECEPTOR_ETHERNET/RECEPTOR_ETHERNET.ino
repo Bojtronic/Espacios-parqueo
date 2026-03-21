@@ -6,7 +6,7 @@
 // ==========================
 // CONFIGURACIÓN ETHERNET
 // ==========================
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xFE, 0xFE, 0xED };
 
 // IP del servidor Node.js
 IPAddress server(192, 168, 18, 52);
@@ -26,7 +26,6 @@ const int led = 26;
 
 bool nuevoDato = false;
 bool estadoRecibido = false;
-bool ultimoEstadoEnviado = false;
 
 typedef struct struct_message {
   bool estado;
@@ -35,7 +34,7 @@ typedef struct struct_message {
 struct_message mensaje;
 
 // ==========================
-// CALLBACK ESP-NOW
+// CALLBACK ESP-NOW (LIGERO)
 // ==========================
 void OnDataRecv(const esp_now_recv_info * info, const uint8_t *incomingData, int len) {
   memcpy(&mensaje, incomingData, sizeof(mensaje));
@@ -99,7 +98,7 @@ void setup() {
   // ==========================
   // SPI + Ethernet
   // ==========================
-  SPI.begin(18, 19, 23, 5);
+  SPI.begin(18, 19, 23);
   Ethernet.init(5);
 
   Serial.println("Inicializando Ethernet...");
@@ -129,7 +128,7 @@ void setup() {
 }
 
 // ==========================
-// LOOP
+// LOOP PRINCIPAL
 // ==========================
 void loop() {
 
@@ -137,18 +136,15 @@ void loop() {
 
     nuevoDato = false;
 
-    Serial.print("Estado: ");
+    Serial.print("Estado recibido: ");
     Serial.println(estadoRecibido ? "ENCENDIDO" : "APAGADO");
 
+    // Actualizar LED inmediatamente
     digitalWrite(led, estadoRecibido ? HIGH : LOW);
 
-    if (estadoRecibido != ultimoEstadoEnviado) {
+    // Enviar SIEMPRE el evento recibido
+    Serial.println("Enviando estado a servidor");
 
-      Serial.println("Cambio detectado → enviando");
-
-      enviarEthernet(estadoRecibido);
-
-      ultimoEstadoEnviado = estadoRecibido;
-    }
+    enviarEthernet(estadoRecibido);
   }
 }

@@ -11,6 +11,9 @@ typedef struct struct_message {
 
 struct_message mensaje;
 
+// Estado anterior del botón
+bool estadoAnterior = HIGH;
+
 // firma para core 3.x
 void OnDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   Serial.print("Estado de envio: ");
@@ -46,11 +49,29 @@ void setup() {
 }
 
 void loop() {
-  bool estadoBoton = digitalRead(boton) == LOW;
+  bool estadoActual = digitalRead(boton);
 
-  mensaje.estado = estadoBoton;
+  // 🔽 Flanco de bajada: botón presionado
+  if (estadoAnterior == HIGH && estadoActual == LOW) {
 
-  esp_now_send(direccionReceptor, (uint8_t *) &mensaje, sizeof(mensaje));
+    mensaje.estado = true;
 
-  delay(100);
+    Serial.println("Botón PRESIONADO → enviando TRUE");
+
+    esp_now_send(direccionReceptor, (uint8_t *) &mensaje, sizeof(mensaje));
+  }
+
+  // 🔼 Flanco de subida: botón soltado
+  if (estadoAnterior == LOW && estadoActual == HIGH) {
+
+    mensaje.estado = false;
+
+    Serial.println("Botón SOLTADO → enviando FALSE");
+
+    esp_now_send(direccionReceptor, (uint8_t *) &mensaje, sizeof(mensaje));
+  }
+
+  estadoAnterior = estadoActual;
+
+  delay(10); // debounce básico
 }
