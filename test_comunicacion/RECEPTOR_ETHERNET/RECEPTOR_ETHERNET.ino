@@ -8,10 +8,8 @@
 // ==========================
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xFE, 0xFE, 0xED };
 
-// IP del servidor Node.js
 IPAddress server(192, 168, 18, 52);
 
-// IP estática (fallback)
 IPAddress ip(192, 168, 18, 60);
 IPAddress dnsServer(192, 168, 18, 1);
 IPAddress gateway(192, 168, 18, 1);
@@ -24,8 +22,12 @@ EthernetClient client;
 // ==========================
 const int led = 26;
 
-bool nuevoDato = false;
-bool estadoRecibido = false;
+// ⚠️ Variables compartidas
+volatile bool nuevoDato = false;
+volatile bool estadoRecibido = false;
+
+// Buffer seguro
+bool estadoProcesado = false;
 
 typedef struct struct_message {
   bool estado;
@@ -34,12 +36,19 @@ typedef struct struct_message {
 struct_message mensaje;
 
 // ==========================
-// CALLBACK ESP-NOW (LIGERO)
+// CALLBACK ESP-NOW (SEGURO)
 // ==========================
 void OnDataRecv(const esp_now_recv_info * info, const uint8_t *incomingData, int len) {
-  memcpy(&mensaje, incomingData, sizeof(mensaje));
 
-  estadoRecibido = mensaje.estado;
+  if (len != sizeof(struct_message)) {
+    Serial.println("Paquete inválido");
+    return;
+  }
+
+  struct_message temp;
+  memcpy(&temp, incomingData, sizeof(temp));
+
+  estadoRecibido = temp.estado;
   nuevoDato = true;
 }
 
@@ -71,7 +80,6 @@ void enviarEthernet(bool estado) {
   Serial.print("Enviado: ");
   Serial.println(json);
 
-  delay(10);
   client.stop();
 }
 
@@ -134,17 +142,19 @@ void loop() {
 
   if (nuevoDato) {
 
+    // 🔒 Copia segura
+    noInterrupts();
+    estadoProcesado = estadoRecibido;
     nuevoDato = false;
+    interrupts();
 
     Serial.print("Estado recibido: ");
-    Serial.println(estadoRecibido ? "ENCENDIDO" : "APAGADO");
+    Serial.println(estadoProcesado ? "ENCENDIDO" : "APAGADO");
 
-    // Actualizar LED inmediatamente
-    digitalWrite(led, estadoRecibido ? HIGH : LOW);
+    // LED inmediato (NO BLOQUEANTE)
+    digitalWrite(led, estadoProcesado ? HIGH : LOW);
 
-    // Enviar SIEMPRE el evento recibido
-    Serial.println("Enviando estado a servidor");
-
-    enviarEthernet(estadoRecibido);
+    // Enviar después (puede bloquear, pero ya no afecta recepción)
+    enviarEthernet(estadoProcesado);
   }
 }

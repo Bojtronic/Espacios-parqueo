@@ -1,16 +1,13 @@
 const express = require('express');
 const os = require('os');
 const path = require('path');
+const WebSocket = require('ws');
 
 const app = express();
 app.use(express.json());
 
-// Servir archivos estáticos desde /public
 app.use(express.static(path.join(__dirname, './public')));
 
-// ==========================
-// OBTENER IPs LOCALES
-// ==========================
 function obtenerIPs() {
     const interfaces = os.networkInterfaces();
     const ips = [];
@@ -26,13 +23,38 @@ function obtenerIPs() {
     return ips;
 }
 
-// ==========================
-// DATOS
-// ==========================
 let estado = {
     mensaje: "Sin datos",
     valor: 0
 };
+
+// ==========================
+// WEBSOCKET SERVER
+// ==========================
+const server = app.listen(3000, '0.0.0.0', () => {
+    const ips = obtenerIPs();
+
+    console.log("Servidor corriendo en:");
+    ips.forEach(ip => console.log(`👉 http://${ip}:3000`));
+    console.log(`👉 http://localhost:3000`);
+});
+
+const wss = new WebSocket.Server({ server });
+
+wss.on('connection', (ws) => {
+    console.log("Cliente WebSocket conectado");
+
+    // Enviar estado actual inmediatamente
+    ws.send(JSON.stringify(estado));
+});
+
+function enviarATodos(data) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify(data));
+        }
+    });
+}
 
 // ==========================
 // API
@@ -46,26 +68,12 @@ app.post('/api/datos', (req, res) => {
 
     console.log("Datos recibidos:", estado);
 
+    // Enviar a todos los clientes en tiempo real
+    enviarATodos(estado);
+
     res.json({ ok: true });
 });
 
 app.get('/api/datos', (req, res) => {
     res.json(estado);
-});
-
-// ==========================
-// SERVIDOR
-// ==========================
-const PORT = 3000;
-
-app.listen(PORT, '0.0.0.0', () => {
-    const ips = obtenerIPs();
-
-    console.log("Servidor corriendo en:");
-
-    ips.forEach(ip => {
-        console.log(`👉 http://${ip}:${PORT}`);
-    });
-
-    console.log(`👉 http://localhost:${PORT}`);
 });
