@@ -51,7 +51,7 @@ void setup() {
 void loop() {
   bool estadoActual = digitalRead(boton);
 
-  // 🔽 Flanco de bajada: botón presionado
+  // Flanco de bajada: botón presionado
   if (estadoAnterior == HIGH && estadoActual == LOW) {
 
     mensaje.estado = true;
@@ -61,7 +61,7 @@ void loop() {
     esp_now_send(direccionReceptor, (uint8_t *) &mensaje, sizeof(mensaje));
   }
 
-  // 🔼 Flanco de subida: botón soltado
+  // Flanco de subida: botón soltado
   if (estadoAnterior == LOW && estadoActual == HIGH) {
 
     mensaje.estado = false;
@@ -73,5 +73,5 @@ void loop() {
 
   estadoAnterior = estadoActual;
 
-  delay(10); // debounce básico
+  delay(10); // debounce
 }

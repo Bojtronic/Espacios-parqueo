@@ -24,7 +24,6 @@ function obtenerIPs() {
 }
 
 let estado = {
-    mensaje: "Sin datos",
     valor: 0
 };
 
@@ -35,8 +34,8 @@ const server = app.listen(3000, '0.0.0.0', () => {
     const ips = obtenerIPs();
 
     console.log("Servidor corriendo en:");
-    ips.forEach(ip => console.log(`👉 http://${ip}:3000`));
-    console.log(`👉 http://localhost:3000`);
+    console.log(`>   http://localhost:3000`);
+    ips.forEach(ip => console.log(`>>> http://${ip}:3000`));
 });
 
 const wss = new WebSocket.Server({ server });

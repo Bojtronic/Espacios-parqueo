@@ -22,7 +22,7 @@ EthernetClient client;
 // ==========================
 const int led = 26;
 
-// ⚠️ Variables compartidas
+// Variables compartidas
 volatile bool nuevoDato = false;
 volatile bool estadoRecibido = false;
 
@@ -62,10 +62,8 @@ void enviarEthernet(bool estado) {
     return;
   }
 
-  char json[64];
-  snprintf(json, sizeof(json),
-           "{\"mensaje\":\"LED\",\"valor\":%d}",
-           estado ? 1 : 0);
+  char json[16];
+  snprintf(json, sizeof(json), "{\"valor\":%d}", estado ? 1 : 0);
 
   client.println("POST /api/datos HTTP/1.1");
   client.println("Host: 192.168.18.52:3000");
@@ -142,7 +140,7 @@ void loop() {
 
   if (nuevoDato) {
 
-    // 🔒 Copia segura
+    // Copia segura
     noInterrupts();
     estadoProcesado = estadoRecibido;
     nuevoDato = false;

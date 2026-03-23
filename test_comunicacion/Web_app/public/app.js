@@ -26,16 +26,16 @@ function conectarWebSocket() {
     socket = new WebSocket(`ws://${window.location.host}`);
 
     socket.onopen = function () {
-        console.log("✅ WebSocket conectado");
+        console.log("WebSocket conectado");
     };
 
     socket.onmessage = function (event) {
-        console.log("📩 Mensaje recibido:", event.data);
+        console.log("Mensaje recibido:", event.data);
 
         try {
             const data = JSON.parse(event.data);
 
-            // 🔥 Asegurar que sea número
+            // Asegurar que sea número
             const valor = Number(data.valor);
 
             actualizarUI(valor);
