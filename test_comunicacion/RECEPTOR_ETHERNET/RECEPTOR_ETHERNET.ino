@@ -1,4 +1,5 @@
 #include <esp_now.h>
+#include <esp_task_wdt.h>
 #include <WiFi.h>
 #include <SPI.h>
 #include <EthernetENC.h>
@@ -8,8 +9,10 @@
 // ==========================
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xFE, 0xFE, 0xED };
 
+// IP del servidor
 IPAddress server(192, 168, 18, 52);
 
+// Configuración estática
 IPAddress ip(192, 168, 18, 60);
 IPAddress dnsServer(192, 168, 18, 1);
 IPAddress gateway(192, 168, 18, 1);
@@ -17,37 +20,39 @@ IPAddress subnet(255, 255, 255, 0);
 
 EthernetClient client;
 
+unsigned long ultimoReinicioETH = 0;
+unsigned long timereset = 30UL * 60UL * 1000UL; // minutos*60*1000
+
 // ==========================
 // ESP-NOW
 // ==========================
 const int led = 26;
 
-// Variables compartidas
+// Variables compartidas (ISR)
 volatile bool nuevoDato = false;
 volatile bool estadoRecibido = false;
 
-// Buffer seguro
+// Buffer de procesamiento (fuera de ISR)
 bool estadoProcesado = false;
 
 typedef struct struct_message {
   bool estado;
 } struct_message;
 
-struct_message mensaje;
-
 // ==========================
-// CALLBACK ESP-NOW (SEGURO)
+// CALLBACK ESP-NOW
 // ==========================
 void OnDataRecv(const esp_now_recv_info * info, const uint8_t *incomingData, int len) {
 
-  if (len != sizeof(struct_message)) {
-    Serial.println("Paquete inválido");
-    return;
-  }
+  // Validación de tamaño
+  if (len != sizeof(struct_message)) return;
 
   struct_message temp;
+
+  // Copia segura local (rápida)
   memcpy(&temp, incomingData, sizeof(temp));
 
+  // Actualizar flags (mínimo trabajo en ISR)
   estadoRecibido = temp.estado;
   nuevoDato = true;
 }
@@ -57,15 +62,29 @@ void OnDataRecv(const esp_now_recv_info * info, const uint8_t *incomingData, int
 // ==========================
 void enviarEthernet(bool estado) {
 
-  if (!client.connect(server, 3000)) {
-    Serial.println("Error conectando");
-    client.stop(); // limpiar
+  unsigned long start = millis();
+
+  client.stop(); // limpiar siempre antes de conectar
+
+  if (Ethernet.linkStatus() == LinkOFF) {
+    Serial.println("Cable desconectado");
     return;
   }
 
+  // Intentar conexión
+  while (!client.connect(server, 3000)) {
+    if (millis() - start > 100) {
+      Serial.println("Timeout conexión");
+      return;
+    }
+    delay(1); // Para no consumir 100% del CPU
+  }
+
+  // JSON mínimo
   char json[12];
   snprintf(json, sizeof(json), "{\"v\":%d}", estado ? 1 : 0);
 
+  // Cabecera HTTP
   client.println("POST /api/datos HTTP/1.1");
   client.println("Host: 192.168.18.52:3000");
   client.println("Content-Type: application/json");
@@ -74,19 +93,20 @@ void enviarEthernet(bool estado) {
   client.println("Connection: close");
   client.println();
 
+  // Enviar cuerpo
   client.print(json);
 
-  // CLAVE: leer respuesta (libera buffers)
+  // liberar buffers leyendo respuesta
   unsigned long timeout = millis();
 
-  while (client.connected() && millis() - timeout < 200) {
+  while (client.connected() && millis() - timeout < 100) {
     while (client.available()) {
       client.read(); // descartamos datos
       timeout = millis();
     }
   }
 
-  client.stop(); // cerrar limpio
+  client.stop(); // cerrar conexión
 }
 
 // ==========================
@@ -95,11 +115,24 @@ void enviarEthernet(bool estado) {
 void setup() {
   Serial.begin(115200);
 
+  // Watchdog (reinicio si se cuelga)
+  /*
+  esp_task_wdt_config_t wdt_config;
+
+  wdt_config.timeout_ms = 5000;
+  wdt_config.idle_core_mask = 0;
+  wdt_config.trigger_panic = true;
+
+  esp_task_wdt_init(&wdt_config);
+  */
+  esp_task_wdt_add(NULL);
+
   pinMode(led, OUTPUT);
   digitalWrite(led, LOW);
 
   WiFi.mode(WIFI_STA);
 
+  // Inicializar ESP-NOW
   if (esp_now_init() != ESP_OK) {
     Serial.println("Error ESP-NOW");
     return;
@@ -117,29 +150,8 @@ void setup() {
 
   Serial.println("Inicializando Ethernet...");
 
-  Ethernet.begin(mac, ip, gateway, gateway, subnet);
-  
-  /*
-  if (Ethernet.begin(mac)) {
-    Serial.println("DHCP OK!");
-  } else {
-    Serial.println("Fallo DHCP → usando IP estática");
-
-    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-      Serial.println("ERROR: ENC28J60 no detectado");
-      while (true) delay(1);
-    }
-
-    if (Ethernet.linkStatus() == LinkOFF) {
-      Serial.println("Cable Ethernet desconectado");
-    }
-
-    Ethernet.begin(mac, ip, dnsServer, gateway, subnet);
-    Serial.println("IP estática configurada");
-  }
-
-  delay(2000);
-  */
+  // Configuración directa (más estable que DHCP)
+  Ethernet.begin(mac, ip, dnsServer, gateway, subnet);
 
   Serial.print("IP local: ");
   Serial.println(Ethernet.localIP());
@@ -150,21 +162,32 @@ void setup() {
 // ==========================
 void loop() {
 
+  // Si llegó un dato por ESP-NOW
   if (nuevoDato) {
 
-    // Copia segura
+    // Copia segura (evita corrupción)
     noInterrupts();
     estadoProcesado = estadoRecibido;
     nuevoDato = false;
     interrupts();
 
+    // Debug
     Serial.print("Estado recibido: ");
     Serial.println(estadoProcesado ? "ENCENDIDO" : "APAGADO");
 
-    // LED inmediato (NO BLOQUEANTE)
+    // Acción inmediata (rápida)
     digitalWrite(led, estadoProcesado ? HIGH : LOW);
 
-    // Enviar después (puede bloquear, pero ya no afecta recepción)
+    // Envío por Ethernet (más lento)
     enviarEthernet(estadoProcesado);
   }
+
+  // REINICIO PREVENTIVO DE ETHERNET
+  if (!nuevoDato && (millis() - ultimoReinicioETH) > timereset) {
+    Ethernet.begin(mac, ip, dnsServer, gateway, subnet);
+    ultimoReinicioETH = millis();
+  }
+
+  // Mantener vivo el watchdog
+  esp_task_wdt_reset();
 }
