@@ -36,7 +36,7 @@ function conectarWebSocket() {
             const data = JSON.parse(event.data);
 
             // Asegurar que sea número
-            const valor = Number(data.valor);
+            const valor = Number(data.v);
 
             actualizarUI(valor);
 
@@ -46,15 +46,15 @@ function conectarWebSocket() {
     };
 
     socket.onerror = function (error) {
-        console.error("❌ Error WebSocket:", error);
+        console.error("Error WebSocket:", error);
     };
 
     socket.onclose = function () {
         console.warn("⚠️ WebSocket desconectado");
 
-        // 🔁 Reconexión automática
+        // Reconexión automática
         setTimeout(() => {
-            console.log("🔄 Reintentando conexión...");
+            console.log("Reintentando conexión...");
             conectarWebSocket();
         }, 2000);
     };
@@ -68,10 +68,10 @@ async function obtenerEstadoInicial() {
         const res = await fetch('/api/datos');
         const data = await res.json();
 
-        const valor = Number(data.valor);
+        const valor = Number(data.v);
         actualizarUI(valor);
 
-        console.log("🔄 Estado inicial cargado:", data);
+        console.log("Estado inicial cargado:", data);
 
     } catch (error) {
         console.error("Error obteniendo estado inicial:", error);

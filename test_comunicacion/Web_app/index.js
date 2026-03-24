@@ -24,7 +24,7 @@ function obtenerIPs() {
 }
 
 let estado = {
-    valor: 0
+    v: 0
 };
 
 // ==========================

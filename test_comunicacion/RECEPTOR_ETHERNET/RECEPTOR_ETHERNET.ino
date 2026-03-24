@@ -58,12 +58,13 @@ void OnDataRecv(const esp_now_recv_info * info, const uint8_t *incomingData, int
 void enviarEthernet(bool estado) {
 
   if (!client.connect(server, 3000)) {
-    Serial.println("Error conectando al servidor");
+    Serial.println("Error conectando");
+    client.stop(); // limpiar
     return;
   }
 
-  char json[16];
-  snprintf(json, sizeof(json), "{\"valor\":%d}", estado ? 1 : 0);
+  char json[12];
+  snprintf(json, sizeof(json), "{\"v\":%d}", estado ? 1 : 0);
 
   client.println("POST /api/datos HTTP/1.1");
   client.println("Host: 192.168.18.52:3000");
@@ -75,10 +76,17 @@ void enviarEthernet(bool estado) {
 
   client.print(json);
 
-  Serial.print("Enviado: ");
-  Serial.println(json);
+  // CLAVE: leer respuesta (libera buffers)
+  unsigned long timeout = millis();
 
-  client.stop();
+  while (client.connected() && millis() - timeout < 200) {
+    while (client.available()) {
+      client.read(); // descartamos datos
+      timeout = millis();
+    }
+  }
+
+  client.stop(); // cerrar limpio
 }
 
 // ==========================
@@ -109,6 +117,9 @@ void setup() {
 
   Serial.println("Inicializando Ethernet...");
 
+  Ethernet.begin(mac, ip, gateway, gateway, subnet);
+  
+  /*
   if (Ethernet.begin(mac)) {
     Serial.println("DHCP OK!");
   } else {
@@ -128,6 +139,7 @@ void setup() {
   }
 
   delay(2000);
+  */
 
   Serial.print("IP local: ");
   Serial.println(Ethernet.localIP());
