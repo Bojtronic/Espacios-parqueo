@@ -20,8 +20,8 @@ IPAddress subnet(255, 255, 255, 0);
 
 EthernetClient client;
 
-unsigned long ultimoReinicioETH = 0;
-unsigned long timereset = 30UL * 60UL * 1000UL; // minutos*60*1000
+unsigned long ultimaVerificacionETH = 0;
+unsigned long timeconn = 10UL * 60UL * 1000UL; // minutos*60*1000
 
 // ==========================
 // ESP-NOW
@@ -34,6 +34,14 @@ volatile bool estadoRecibido = false;
 
 // Buffer de procesamiento (fuera de ISR)
 bool estadoProcesado = false;
+
+// ==========================
+// SPI
+// ==========================
+#define VSPI_MISO 19
+#define VSPI_MOSI 23
+#define VSPI_SCLK 18
+#define VSPI_CS   17 // 5
 
 typedef struct struct_message {
   bool estado;
@@ -66,18 +74,10 @@ void enviarEthernet(bool estado) {
 
   client.stop(); // limpiar siempre antes de conectar
 
-  if (Ethernet.linkStatus() == LinkOFF) {
-    Serial.println("Cable desconectado");
-    return;
-  }
-
   // Intentar conexión
-  while (!client.connect(server, 3000)) {
-    if (millis() - start > 100) {
-      Serial.println("Timeout conexión");
-      return;
-    }
-    delay(1); // Para no consumir 100% del CPU
+  if (!client.connect(server, 3000)) {
+    Serial.println("Error de conexión");
+    return;
   }
 
   // JSON mínimo
@@ -115,16 +115,6 @@ void enviarEthernet(bool estado) {
 void setup() {
   Serial.begin(115200);
 
-  // Watchdog (reinicio si se cuelga)
-  /*
-  esp_task_wdt_config_t wdt_config;
-
-  wdt_config.timeout_ms = 5000;
-  wdt_config.idle_core_mask = 0;
-  wdt_config.trigger_panic = true;
-
-  esp_task_wdt_init(&wdt_config);
-  */
   esp_task_wdt_add(NULL);
 
   pinMode(led, OUTPUT);
@@ -145,8 +135,8 @@ void setup() {
   // ==========================
   // SPI + Ethernet
   // ==========================
-  SPI.begin(18, 19, 23);
-  Ethernet.init(5);
+  SPI.begin(VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_CS);
+  Ethernet.init(VSPI_CS);
 
   Serial.println("Inicializando Ethernet...");
 
@@ -175,19 +165,26 @@ void loop() {
     Serial.print("Estado recibido: ");
     Serial.println(estadoProcesado ? "ENCENDIDO" : "APAGADO");
 
-    // Acción inmediata (rápida)
+    // Encender LED
     digitalWrite(led, estadoProcesado ? HIGH : LOW);
 
     // Envío por Ethernet (más lento)
     enviarEthernet(estadoProcesado);
   }
 
-  // REINICIO PREVENTIVO DE ETHERNET
-  if (!nuevoDato && (millis() - ultimoReinicioETH) > timereset) {
+
+  if ((Ethernet.linkStatus() == LinkOFF) && ((millis() - ultimaVerificacionETH) > timeconn)) {
+    Serial.println("NO hay conexion Ethernet");
+    //ESP.restart();
     Ethernet.begin(mac, ip, dnsServer, gateway, subnet);
-    ultimoReinicioETH = millis();
+    ultimaVerificacionETH = millis();
+    return;
   }
 
   // Mantener vivo el watchdog
   esp_task_wdt_reset();
+
+  // delay() es un bloqueo activo que consume ciclos de CPU, 
+  // mientras que vTaskDelay() libera la CPU.
+  vTaskDelay(10);
 }
